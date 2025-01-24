@@ -17,6 +17,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.content.res.Configuration
@@ -63,6 +64,7 @@ inline fun <reified T : Service> Context.stopService() {
 @SuppressLint("UnspecifiedImmutableFlag")
 inline fun <reified T : Service> Context.servicePendingIntent(
     action: String,
+    requestCode: Int = 0,
     configIntent: Intent.() -> Unit = {}
 ): PendingIntent? {
     val intent = Intent(this, T::class.java)
@@ -73,7 +75,7 @@ inline fun <reified T : Service> Context.servicePendingIntent(
     } else {
         FLAG_UPDATE_CURRENT
     }
-    return getService(this, 0, intent, flags)
+    return getService(this, requestCode, intent, flags)
 }
 
 @SuppressLint("UnspecifiedImmutableFlag")
@@ -120,6 +122,14 @@ inline fun <reified T : BroadcastReceiver> Context.broadcastPendingIntent(
         FLAG_UPDATE_CURRENT
     }
     return getBroadcast(this, 0, intent, flags)
+}
+
+fun Context.startForegroundServiceCompat(intent: Intent) {
+    try {
+        startService(intent)
+    } catch (e: IllegalStateException) {
+        ContextCompat.startForegroundService(this, intent)
+    }
 }
 
 val Context.defaultSharedPreferences: SharedPreferences
@@ -375,3 +385,6 @@ val Context.channel: String
         }
         return ""
     }
+
+val Context.isDebuggable: Boolean
+    get() = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0

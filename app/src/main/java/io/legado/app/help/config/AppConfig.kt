@@ -36,6 +36,9 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
     var clickActionBC = appCtx.getPrefInt(PreferKey.clickActionBC, 1)
     var clickActionBR = appCtx.getPrefInt(PreferKey.clickActionBR, 1)
     var themeMode = appCtx.getPrefString(PreferKey.themeMode, "0")
+    var useDefaultCover = appCtx.getPrefBoolean(PreferKey.useDefaultCover, false)
+    var optimizeRender = appCtx.getPrefBoolean(PreferKey.optimizeRender, false)
+    var recordLog = appCtx.getPrefBoolean(PreferKey.recordLog)
 
     override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) {
         when (key) {
@@ -43,6 +46,7 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
                 themeMode = appCtx.getPrefString(PreferKey.themeMode, "0")
                 isEInkMode = themeMode == "3"
             }
+
             PreferKey.clickActionTL -> clickActionTL =
                 appCtx.getPrefInt(PreferKey.clickActionTL, 2)
 
@@ -79,6 +83,14 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
             PreferKey.userAgent -> userAgent = getPrefUserAgent()
 
             PreferKey.antiAlias -> useAntiAlias = appCtx.getPrefBoolean(PreferKey.antiAlias)
+
+            PreferKey.useDefaultCover -> useDefaultCover =
+                appCtx.getPrefBoolean(PreferKey.useDefaultCover, false)
+
+            PreferKey.optimizeRender -> optimizeRender =
+                appCtx.getPrefBoolean(PreferKey.optimizeRender, false)
+
+            PreferKey.recordLog -> recordLog = appCtx.getPrefBoolean(PreferKey.recordLog)
 
         }
     }
@@ -132,8 +144,8 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
             }
         }
 
-    val useDefaultCover: Boolean
-        get() = appCtx.getPrefBoolean(PreferKey.useDefaultCover, false)
+    val textSelectAble: Boolean
+        get() = appCtx.getPrefBoolean(PreferKey.textSelectAble, true)
 
     val isTransparentStatusBar: Boolean
         get() = appCtx.getPrefBoolean(PreferKey.transparentStatusBar, true)
@@ -278,7 +290,10 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
         }
 
     var elevation: Int
-        get() = appCtx.getPrefInt(PreferKey.barElevation, AppConst.sysElevation)
+        get() = if (isEInkMode) 0 else appCtx.getPrefInt(
+            PreferKey.barElevation,
+            AppConst.sysElevation
+        )
         set(value) {
             appCtx.putPrefInt(PreferKey.barElevation, value)
         }
@@ -366,6 +381,12 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
             appCtx.putPrefBoolean(PreferKey.tocUiUseReplace, value)
         }
 
+    var tocCountWords: Boolean
+        get() = appCtx.getPrefBoolean(PreferKey.tocCountWords, true)
+        set(value) {
+            appCtx.putPrefBoolean(PreferKey.tocCountWords, value)
+        }
+
     var enableReadRecord: Boolean
         get() = appCtx.getPrefBoolean(PreferKey.enableReadRecord, true)
         set(value) {
@@ -439,7 +460,12 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
 
     val syncBookProgress get() = appCtx.getPrefBoolean(PreferKey.syncBookProgress, true)
 
+    val syncBookProgressPlus get() = appCtx.getPrefBoolean(PreferKey.syncBookProgressPlus, false)
+
     val mediaButtonOnExit get() = appCtx.getPrefBoolean("mediaButtonOnExit", true)
+
+    val readAloudByMediaButton
+        get() = appCtx.getPrefBoolean(PreferKey.readAloudByMediaButton, false)
 
     val replaceEnableDefault get() = appCtx.getPrefBoolean(PreferKey.replaceEnableDefault, true)
 
@@ -447,21 +473,25 @@ object AppConfig : SharedPreferences.OnSharedPreferenceChangeListener {
 
     val webDavDeviceName get() = appCtx.getPrefString(PreferKey.webDavDeviceName, Build.MODEL)
 
-    val recordLog get() = appCtx.getPrefBoolean(PreferKey.recordLog)
-
     val recordHeapDump get() = appCtx.getPrefBoolean(PreferKey.recordHeapDump, false)
 
     val loadCoverOnlyWifi get() = appCtx.getPrefBoolean(PreferKey.loadCoverOnlyWifi, false)
 
     val showAddToShelfAlert get() = appCtx.getPrefBoolean(PreferKey.showAddToShelfAlert, true)
 
-    val asyncLoadImage get() = appCtx.getPrefBoolean(PreferKey.asyncLoadImage, false)
-
     val ignoreAudioFocus get() = appCtx.getPrefBoolean(PreferKey.ignoreAudioFocus, false)
+
+    var pauseReadAloudWhilePhoneCalls
+        get() = appCtx.getPrefBoolean(PreferKey.pauseReadAloudWhilePhoneCalls, false)
+        set(value) = appCtx.putPrefBoolean(PreferKey.pauseReadAloudWhilePhoneCalls, value)
 
     val onlyLatestBackup get() = appCtx.getPrefBoolean(PreferKey.onlyLatestBackup, true)
 
     val defaultHomePage get() = appCtx.getPrefString(PreferKey.defaultHomePage, "bookshelf")
+
+    val updateToVariant get() = appCtx.getPrefString(PreferKey.updateToVariant, "default_version")
+
+    val streamReadAloudAudio get() = appCtx.getPrefBoolean(PreferKey.streamReadAloudAudio, false)
 
     val doublePageHorizontal: String?
         get() = appCtx.getPrefString(PreferKey.doublePageHorizontal)

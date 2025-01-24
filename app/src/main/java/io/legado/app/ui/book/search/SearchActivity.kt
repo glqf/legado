@@ -10,6 +10,7 @@ import android.view.View.VISIBLE
 import android.widget.TextView
 import androidx.activity.viewModels
 import androidx.appcompat.widget.SearchView
+import androidx.core.os.bundleOf
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -33,6 +34,8 @@ import io.legado.app.ui.about.AppLogDialog
 import io.legado.app.ui.book.info.BookInfoActivity
 import io.legado.app.ui.book.source.manage.BookSourceActivity
 import io.legado.app.utils.ColorUtils
+import io.legado.app.utils.applyNavigationBarMargin
+import io.legado.app.utils.applyNavigationBarPadding
 import io.legado.app.utils.applyTint
 import io.legado.app.utils.getPrefBoolean
 import io.legado.app.utils.gone
@@ -91,9 +94,9 @@ class SearchActivity : VMBaseActivity<ActivityBookSearchBinding, SearchViewModel
         receiptIntent(intent)
     }
 
-    override fun onNewIntent(data: Intent?) {
-        super.onNewIntent(data)
-        receiptIntent(data)
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        receiptIntent(intent)
     }
 
     override fun onCompatCreateOptionsMenu(menu: Menu): Boolean {
@@ -172,10 +175,8 @@ class SearchActivity : VMBaseActivity<ActivityBookSearchBinding, SearchViewModel
 
     private fun initSearchView() {
         searchView.applyTint(primaryTextColor)
-        searchView.onActionViewExpanded()
         searchView.isSubmitButtonEnabled = true
         searchView.queryHint = getString(R.string.search_book_key)
-        searchView.clearFocus()
         searchView.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
             override fun onQueryTextSubmit(query: String): Boolean {
                 searchView.clearFocus()
@@ -211,11 +212,14 @@ class SearchActivity : VMBaseActivity<ActivityBookSearchBinding, SearchViewModel
         binding.rvHistoryKey.setEdgeEffectColor(primaryColor)
         binding.rvBookshelfSearch.layoutManager = FlexboxLayoutManager(this)
         binding.rvBookshelfSearch.adapter = bookAdapter
+        binding.rvBookshelfSearch.applyNavigationBarMargin()
         binding.rvHistoryKey.layoutManager = FlexboxLayoutManager(this)
         binding.rvHistoryKey.adapter = historyKeyAdapter
+        binding.rvHistoryKey.applyNavigationBarMargin()
         binding.recyclerView.layoutManager = LinearLayoutManager(this)
         binding.recyclerView.adapter = adapter
         binding.recyclerView.itemAnimator = null
+        binding.recyclerView.applyNavigationBarPadding()
         adapter.registerAdapterDataObserver(object : RecyclerView.AdapterDataObserver() {
             override fun onItemRangeInserted(positionStart: Int, itemCount: Int) {
                 super.onItemRangeInserted(positionStart, itemCount)
@@ -306,6 +310,7 @@ class SearchActivity : VMBaseActivity<ActivityBookSearchBinding, SearchViewModel
         }
         if (viewModel.isSearchLiveData.value == false
             && viewModel.searchKey.isNotEmpty()
+            && viewModel.hasMore
         ) {
             viewModel.search("")
         }
@@ -367,6 +372,7 @@ class SearchActivity : VMBaseActivity<ActivityBookSearchBinding, SearchViewModel
      * 开始搜索
      */
     private fun startSearch() {
+        binding.refreshProgressBar.visible()
         binding.refreshProgressBar.isAutoLoading = true
         binding.fbStop.visible()
     }
@@ -376,19 +382,21 @@ class SearchActivity : VMBaseActivity<ActivityBookSearchBinding, SearchViewModel
      */
     private fun searchFinally() {
         binding.refreshProgressBar.isAutoLoading = false
+        binding.refreshProgressBar.gone()
         binding.fbStop.invisible()
     }
 
     override fun observeLiveBus() {
         viewModel.upAdapterLiveData.observe(this) {
-            adapter.notifyItemRangeChanged(0, adapter.itemCount, it)
+            adapter.notifyItemRangeChanged(0, adapter.itemCount, bundleOf(it to null))
         }
         viewModel.searchFinishLiveData.observe(this) { isEmpty ->
             if (!isEmpty || viewModel.searchScope.isAll()) return@observe
             alert("搜索结果为空") {
                 val precisionSearch = appCtx.getPrefBoolean(PreferKey.precisionSearch)
+                val displayScope = viewModel.searchScope.display
                 if (precisionSearch) {
-                    setMessage("${viewModel.searchScope.display}分组搜索结果为空，是否关闭精准搜索？")
+                    setMessage("${displayScope}分组搜索结果为空，是否关闭精准搜索？")
                     yesButton {
                         appCtx.putPrefBoolean(PreferKey.precisionSearch, false)
                         precisionSearchMenuItem?.isChecked = false
@@ -396,7 +404,7 @@ class SearchActivity : VMBaseActivity<ActivityBookSearchBinding, SearchViewModel
                         viewModel.search(searchView.query.toString())
                     }
                 } else {
-                    setMessage("${viewModel.searchScope.display}分组搜索结果为空，是否切换到全部分组？")
+                    setMessage("${displayScope}分组搜索结果为空，是否切换到全部分组？")
                     yesButton {
                         viewModel.searchScope.update("")
                     }

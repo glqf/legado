@@ -11,6 +11,7 @@ import io.legado.app.constant.EventBus
 import io.legado.app.constant.IntentAction
 import io.legado.app.constant.NotificationId
 import io.legado.app.data.appDb
+import io.legado.app.help.book.update
 import io.legado.app.help.config.AppConfig
 import io.legado.app.model.CacheBook
 import io.legado.app.model.webBook.WebBook
@@ -23,6 +24,8 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import splitties.init.appCtx
 import splitties.systemservices.notificationManager
 import java.util.concurrent.Executors
@@ -43,10 +46,12 @@ class CacheBookService : BaseService() {
         Executors.newFixedThreadPool(min(threadCount, AppConst.MAX_THREAD)).asCoroutineDispatcher()
     private var downloadJob: Job? = null
     private var notificationContent = appCtx.getString(R.string.service_starting)
+    private var mutex = Mutex()
     private val notificationBuilder by lazy {
         val builder = NotificationCompat.Builder(this, AppConst.channelIdDownload)
             .setSmallIcon(R.drawable.ic_download)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .setContentTitle(getString(R.string.offline_cache))
             .setContentIntent(activityPendingIntent<CacheActivity>("cacheActivity"))
         builder.addAction(
@@ -102,27 +107,30 @@ class CacheBookService : BaseService() {
             val chapterCount = appDb.bookChapterDao.getChapterCount(bookUrl)
             val book = cacheBook.book
             if (chapterCount == 0) {
-                val name = book.name
-                if (book.tocUrl.isEmpty()) {
-                    kotlin.runCatching {
-                        WebBook.getBookInfoAwait(cacheBook.bookSource, book)
-                    }.onFailure {
-                        val msg = "《$name》目录为空且加载详情页失败\n${it.localizedMessage}"
+                mutex.withLock {
+                    val name = book.name
+                    if (book.tocUrl.isEmpty()) {
+                        kotlin.runCatching {
+                            WebBook.getBookInfoAwait(cacheBook.bookSource, book)
+                        }.onFailure {
+                            val msg = "《$name》目录为空且加载详情页失败\n${it.localizedMessage}"
+                            AppLog.put(msg, it, true)
+                            return@execute
+                        }
+                    }
+                    WebBook.getChapterListAwait(cacheBook.bookSource, book).onFailure {
+                        if (book.totalChapterNum > 0) {
+                            book.totalChapterNum = 0
+                            book.update()
+                        }
+                        val msg = "《$name》目录为空且加载目录失败\n${it.localizedMessage}"
                         AppLog.put(msg, it, true)
                         return@execute
+                    }.getOrNull()?.let { toc ->
+                        appDb.bookChapterDao.insert(*toc.toTypedArray())
                     }
+                    book.update()
                 }
-                WebBook.getChapterListAwait(cacheBook.bookSource, book).onFailure {
-                    if (book.totalChapterNum > 0) {
-                        book.totalChapterNum = 0
-                        book.save()
-                    }
-                    AppLog.put("《$name》目录为空且加载目录失败\n${it.localizedMessage}", it, true)
-                    return@execute
-                }.getOrNull()?.let { toc ->
-                    appDb.bookChapterDao.insert(*toc.toTypedArray())
-                }
-                book.save()
             }
             val end2 = if (end < 0) {
                 book.lastChapterIndex
@@ -132,8 +140,10 @@ class CacheBookService : BaseService() {
             cacheBook.addDownload(start, end2)
             notificationContent = CacheBook.downloadSummary
             upCacheBookNotification()
-            if (downloadJob == null) {
-                download()
+            synchronized(this) {
+                if (downloadJob == null) {
+                    download()
+                }
             }
         }
     }

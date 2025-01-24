@@ -249,13 +249,14 @@ class DownloadService : BaseService() {
             .setSmallIcon(R.drawable.ic_download)
             .setSubText(getString(R.string.action_download))
             .setContentTitle(content)
+            .setOnlyAlertOnce(true)
             .setContentIntent(
-                servicePendingIntent<DownloadService>(IntentAction.play) {
+                servicePendingIntent<DownloadService>(IntentAction.play, downloadId.toInt()) {
                     putExtra("downloadId", downloadId)
                 }
             )
             .setDeleteIntent(
-                servicePendingIntent<DownloadService>(IntentAction.stop) {
+                servicePendingIntent<DownloadService>(IntentAction.stop, downloadId.toInt()) {
                     putExtra("downloadId", downloadId)
                 }
             )
