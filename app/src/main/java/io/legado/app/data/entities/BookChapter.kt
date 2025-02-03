@@ -1,5 +1,6 @@
 package io.legado.app.data.entities
 
+import android.annotation.SuppressLint
 import android.os.Parcelable
 import androidx.room.Entity
 import androidx.room.ForeignKey
@@ -50,6 +51,7 @@ data class BookChapter(
     var isPay: Boolean = false,         // 是否已购买
     var resourceUrl: String? = null,    // 音频真实URL
     var tag: String? = null,            // 更新时间或其他章节附加信息
+    var wordCount: String? = null,      // 本章节字数
     var start: Long? = null,            // 章节起始位置
     var end: Long? = null,              // 章节终止位置
     var startFragmentId: String? = null,  //EPUB书籍当前章节的fragmentId
@@ -64,11 +66,9 @@ data class BookChapter(
         GSON.fromJsonObject<HashMap<String, String>>(variable).getOrNull() ?: hashMapOf()
     }
 
-    @delegate:Ignore
+    @Ignore
     @IgnoredOnParcel
-    private val titleMD5: String by lazy {
-        MD5Utils.md5Encode16(title)
-    }
+    var titleMD5: String? = null
 
     override fun putVariable(key: String, value: String?): Boolean {
         if (super.putVariable(key, value)) {
@@ -158,12 +158,24 @@ data class BookChapter(
         }
     }
 
-    @Suppress("unused")
-    fun getFileName(suffix: String = "nb"): String =
-        String.format("%05d-%s.%s", index, titleMD5, suffix)
+    private fun ensureTitleMD5Init() {
+        if (titleMD5 == null) {
+            titleMD5 = MD5Utils.md5Encode16(title)
+        }
+    }
 
-
+    @SuppressLint("DefaultLocale")
     @Suppress("unused")
-    fun getFontName(): String = String.format("%05d-%s.ttf", index, titleMD5)
+    fun getFileName(suffix: String = "nb"): String {
+        ensureTitleMD5Init()
+        return String.format("%05d-%s.%s", index, titleMD5, suffix)
+    }
+
+    @SuppressLint("DefaultLocale")
+    @Suppress("unused")
+    fun getFontName(): String {
+        ensureTitleMD5Init()
+        return String.format("%05d-%s.ttf", index, titleMD5)
+    }
 }
 

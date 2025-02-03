@@ -10,6 +10,7 @@ import io.legado.app.data.appDb
 import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookChapter
 import io.legado.app.data.entities.BookSource
+import io.legado.app.help.config.AppConfig
 import io.legado.app.model.analyzeRule.AnalyzeUrl
 import io.legado.app.model.localBook.LocalBook
 import io.legado.app.utils.ArchiveUtils
@@ -20,16 +21,19 @@ import io.legado.app.utils.NetworkUtils
 import io.legado.app.utils.StringUtils
 import io.legado.app.utils.SvgUtils
 import io.legado.app.utils.UrlUtil
+import io.legado.app.utils.createFileIfNotExist
 import io.legado.app.utils.exists
 import io.legado.app.utils.externalFiles
 import io.legado.app.utils.getFile
 import io.legado.app.utils.isContentScheme
+import io.legado.app.utils.onEachParallel
 import io.legado.app.utils.postEvent
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers.IO
-import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import org.apache.commons.text.similarity.JaccardSimilarity
 import splitties.init.appCtx
@@ -41,6 +45,7 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.regex.Pattern
 import java.util.zip.ZipFile
+import kotlin.coroutines.coroutineContext
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -51,7 +56,7 @@ object BookHelp {
     private const val cacheFolderName = "book_cache"
     private const val cacheImageFolderName = "images"
     private const val cacheEpubFolderName = "epub"
-    private val downloadImages = ConcurrentHashMap.newKeySet<String>()
+    private val downloadImages = ConcurrentHashMap<String, Mutex>()
 
     val cachePath = FileUtils.getPath(downloadDir, cacheFolderName)
 
@@ -122,7 +127,7 @@ object BookHelp {
     ) {
         try {
             saveText(book, bookChapter, content)
-            saveImages(bookSource, book, bookChapter, content)
+            //saveImages(bookSource, book, bookChapter, content)
             postEvent(EventBus.SAVE_CONTENT, Pair(book, bookChapter))
         } catch (e: Exception) {
             e.printStackTrace()
@@ -143,27 +148,29 @@ object BookHelp {
             book.getFolderName(),
             bookChapter.getFileName(),
         ).writeText(content)
+        if (book.isOnLineTxt && AppConfig.tocCountWords) {
+            bookChapter.wordCount = StringUtils.wordCountFormat(content.length)
+            appDb.bookChapterDao.update(bookChapter)
+        }
     }
 
     suspend fun saveImages(
         bookSource: BookSource,
         book: Book,
         bookChapter: BookChapter,
-        content: String
+        content: String,
+        concurrency: Int = AppConfig.threadCount
     ) = coroutineScope {
-        val awaitList = arrayListOf<Deferred<Unit>>()
-        val matcher = AppPattern.imgPattern.matcher(content)
-        while (matcher.find()) {
-            matcher.group(1)?.let { src ->
+        flow {
+            val matcher = AppPattern.imgPattern.matcher(content)
+            while (matcher.find()) {
+                val src = matcher.group(1) ?: continue
                 val mSrc = NetworkUtils.getAbsoluteURL(bookChapter.url, src)
-                awaitList.add(async {
-                    saveImage(bookSource, book, mSrc, bookChapter)
-                })
+                emit(mSrc)
             }
-        }
-        awaitList.forEach {
-            it.await()
-        }
+        }.onEachParallel(concurrency) { mSrc ->
+            saveImage(bookSource, book, mSrc, bookChapter)
+        }.collect()
     }
 
     suspend fun saveImage(
@@ -172,15 +179,18 @@ object BookHelp {
         src: String,
         chapter: BookChapter? = null
     ) {
-        while (downloadImages.contains(src)) {
-            delay(100)
-        }
-        if (getImage(book, src).exists()) {
+        if (isImageExist(book, src)) {
             return
         }
-        downloadImages.add(src)
-        val analyzeUrl = AnalyzeUrl(src, source = bookSource)
+        val mutex = synchronized(this) {
+            downloadImages.getOrPut(src) { Mutex() }
+        }
+        mutex.lock()
         try {
+            if (isImageExist(book, src)) {
+                return
+            }
+            val analyzeUrl = AnalyzeUrl(src, source = bookSource)
             val bytes = analyzeUrl.getByteArrayAwait()
             //某些图片被加密，需要进一步解密
             ImageUtils.decode(
@@ -192,21 +202,15 @@ object BookHelp {
                     // throw NoStackTraceException("数据异常")
                     AppLog.put("${book.name} ${chapter?.title} 图片 $src 下载错误 数据异常")
                 }
-                FileUtils.createFileIfNotExist(
-                    downloadDir,
-                    cacheFolderName,
-                    book.getFolderName(),
-                    cacheImageFolderName,
-                    "${MD5Utils.md5Encode16(src)}.${getImageSuffix(src)}"
-                ).writeBytes(it)
+                writeImage(book, src, it)
             }
         } catch (e: Exception) {
-            AppLog.put(
-                "${book.name} ${chapter?.title} 图片 $src 下载失败\n${e.localizedMessage}",
-                e
-            )
+            coroutineContext.ensureActive()
+            val msg = "${book.name} ${chapter?.title} 图片 $src 下载失败\n${e.localizedMessage}"
+            AppLog.put(msg, e)
         } finally {
             downloadImages.remove(src)
+            mutex.unlock()
         }
     }
 
@@ -217,6 +221,16 @@ object BookHelp {
             cacheImageFolderName,
             "${MD5Utils.md5Encode16(src)}.${getImageSuffix(src)}"
         )
+    }
+
+    @Synchronized
+    fun writeImage(book: Book, src: String, bytes: ByteArray) {
+        getImage(book, src).createFileIfNotExist().writeBytes(bytes)
+    }
+
+    @Synchronized
+    fun isImageExist(book: Book, src: String): Boolean {
+        return getImage(book, src).exists()
     }
 
     fun getImageSuffix(src: String): String {
@@ -437,7 +451,7 @@ object BookHelp {
         newChapterList: List<BookChapter>,
         oldChapterListSize: Int = 0
     ): Int {
-        if (oldDurChapterIndex == 0) return 0
+        if (oldDurChapterIndex <= 0) return 0
         if (newChapterList.isEmpty()) return oldDurChapterIndex
         val oldChapterNum = getChapterNum(oldDurChapterName)
         val oldName = getPureChapterName(oldDurChapterName)
@@ -477,6 +491,15 @@ object BookHelp {
             newIndex
         } else {
             min(max(0, newChapterList.size - 1), oldDurChapterIndex)
+        }
+    }
+
+    fun getDurChapter(
+        oldBook: Book,
+        newChapterList: List<BookChapter>
+    ): Int {
+        return oldBook.run {
+            getDurChapter(durChapterIndex, durChapterTitle, newChapterList, totalChapterNum)
         }
     }
 
